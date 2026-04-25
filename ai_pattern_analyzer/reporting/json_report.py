@@ -28,7 +28,7 @@ from ..scoring.model import FileAnalysis
 from ..config import ANALYZER_VERSION, SCORING_MODEL_VERSION, RULESET_VERSION
 
 
-SCHEMA_VERSION = "4.0"
+SCHEMA_VERSION = "5.0"
 
 DISCLAIMER_TEXT = (
     "This tool detects code-generation PATTERNS using statistical heuristics. "
@@ -66,6 +66,9 @@ def build_report(
         analyses = all_analyses.get(stats.repo_name, [])
         repos_out.append(_build_repo(stats, analyses, include_snippets))
 
+    # v5.0: Portfolio-level origin estimate
+    portfolio_origin = _compute_portfolio_origin(all_stats)
+
     return {
         "schema_version":         SCHEMA_VERSION,
         "disclaimer":             DISCLAIMER_TEXT,
@@ -77,6 +80,7 @@ def build_report(
             "timestamp":  now,
             "invocation": cli_args or {},
         },
+        "portfolio_origin_estimate": portfolio_origin,
         "repos": repos_out,
     }
 
@@ -89,6 +93,7 @@ def _build_repo(
     return {
         "repo":           stats.repo_name,
         "summary":        stats.as_dict(),
+        "origin_estimate": stats.origin_estimate.as_dict() if stats.origin_estimate else None,
         "data_quality": {
             "score":  stats.data_quality_score,
             "exclusions": stats.exclusions,
@@ -103,6 +108,35 @@ def _build_repo(
         "false_positive_candidates": _find_fp_candidates(analyses),
         "high_confidence_candidates": _find_hc_candidates(analyses),
     }
+
+
+def _compute_portfolio_origin(all_stats: List[RepoStats]) -> Optional[Dict[str, Any]]:
+    """Compute portfolio-wide origin estimate from all repo estimates."""
+    try:
+        from ..origin.engine import aggregate_origin_estimates
+        pairs = [
+            (s.origin_estimate, s.production_files)
+            for s in all_stats
+            if s.origin_estimate is not None and s.production_files > 0
+        ]
+        if not pairs:
+            return None
+        portfolio = aggregate_origin_estimates(pairs)
+        result = portfolio.as_dict()
+        result["methodology"] = (
+            "Weighted average of per-repository origin estimates. "
+            "Each repository weighted by production file count. "
+            "These are heuristic estimates, not forensic proof."
+        )
+        result["caveats"] = [
+            "Portfolio estimate aggregates heuristic signals across repositories.",
+            "Vendor and generated files are excluded from KPI by default.",
+            "Confidence may be lower for small or poorly-covered repositories.",
+            "These percentages do not constitute proof of AI authorship.",
+        ]
+        return result
+    except Exception:
+        return None
 
 
 def _file_summary(a: FileAnalysis) -> Dict[str, Any]:

@@ -5,6 +5,10 @@ v4.0: Extended with FileCategory (semantic classification) in addition to
       the legacy FileKind (structural kind). FileCategory is used for score
       adjustment; FileKind is kept for backward compatibility.
 
+v5.0: Significantly extended vendor/generated path detection patterns.
+      Added iOS (Pods, Carthage), Python (site-packages), proto/grpc/avro/swagger,
+      and kapt/apt generated sources. Updated SKIP_DIRS accordingly.
+
 File category classification order (first match wins):
   1. Vendor/third-party directory check
   2. Generated code (headers, patterns, path-based)
@@ -80,9 +84,18 @@ _GENERATED_HEADER_RE = re.compile(
     r"automatically generated|@generated|@auto-generated|"
     r"This file was automatically|This code is auto-generated)", re.I,
 )
+
+# v5.0: Comprehensive generated code directory patterns
 _GENERATED_DIR_RE = re.compile(
-    r"(?:^|[\\/])(?:generated-sources?|generated|auto-generated|"
-    r"target/generated|build/generated|\.generated)(?:[\\/]|$)", re.I,
+    r"(?:^|[\\/])(?:"
+    r"generated|gen|__generated__|auto\.?generated|"
+    r"generated[\-_]sources?|target[\\/]generated|"
+    r"build[\\/]generated|generated[\-_]out|"
+    r"openapi|swagger|avro|protobuf|proto|grpc|"
+    r"graphql[\-_]generated|jooq[\-_]generated|thrift|"
+    r"\.generated|annotation[\-_]processing|"
+    r"apt[\-_]generated|kapt[\-_]generated"
+    r")(?:[\\/]|$)", re.I,
 )
 _OPENAPI_GENERATED_RE = re.compile(
     r"@Schema\s*\(|@ApiModel\b|openapi-generator|swagger-codegen", re.I,
@@ -123,19 +136,28 @@ _TEST_CONTENT_RE = re.compile(
 )
 
 
-def _is_test(path: Path, header: str) -> bool:
+def _is_test(path: Path, header: str, root: Optional[Path] = None) -> bool:
     if _TEST_NAME_RE.search(path.name):
         return True
-    if _TEST_DIR_RE.search(str(path)):
+    # Use relative path for directory check to avoid matching parent dirs like /Documents/Tests/
+    check_path = str(path.relative_to(root)) if root else str(path)
+    if _TEST_DIR_RE.search(check_path):
         return True
     return bool(_TEST_CONTENT_RE.search(header))
 
 
 # ── Vendor patterns ───────────────────────────────────────────────────────────
 
+# v5.0: Comprehensive vendor/third-party directory patterns
 _VENDOR_DIR_RE = re.compile(
-    r"(?:^|[\\/])(?:vendor|third.?party|thirdparty|extern|external"
-    r"|bower_components|jspm_packages|node_modules)(?:[\\/]|$)", re.I,
+    r"(?:^|[\\/])(?:"
+    r"vendor|vendored|third.?party|thirdparty|external|"
+    r"extern|deps|dependencies|libs?|bower_components|"
+    r"node_modules|jspm_packages|__vendor__|"
+    r"org\.apache|com\.google|io\.netty|"        # common package structures inside vendored dirs
+    r"site[\-_]packages|dist[\-_]packages|"      # Python vendored
+    r"Pods|Carthage|Frameworks"                  # iOS vendored
+    r")(?:[\\/]|$)", re.I,
 )
 
 
@@ -296,11 +318,19 @@ def determine_category(path: Path, header: str, lang: str, kind: FileKind) -> Fi
     """
     Determine the semantic FileCategory for a file.
     Classification order is significant — first match wins.
+
+    v5.0: Vendor and generated path detection is applied aggressively using
+    the extended _VENDOR_DIR_RE and _GENERATED_DIR_RE patterns even when
+    FileKind does not indicate vendor/generated, to catch vendored code that
+    sits outside the canonical vendor/ directory.
     """
-    if kind == FileKind.VENDOR:
+    # v5.0: Apply vendor dir regex aggressively — catches vendored code
+    # in unusual locations (e.g. libs/, Pods/, site-packages/)
+    if kind == FileKind.VENDOR or _VENDOR_DIR_RE.search(str(path)):
         return FileCategory.VENDOR
 
-    if kind == FileKind.GENERATED or _is_generated(path, header):
+    # v5.0: Apply generated dir regex aggressively — catches proto/grpc/avro outputs
+    if kind == FileKind.GENERATED or _is_generated(path, header) or _GENERATED_DIR_RE.search(str(path)):
         return FileCategory.GENERATED
 
     # Test detection before other patterns (test files take priority)
@@ -378,7 +408,7 @@ def classify_file(path: Path, root: Optional[Path] = None) -> Optional[Discovere
         kind = FileKind.VENDOR
     elif _is_generated(path, header):
         kind = FileKind.GENERATED
-    elif _is_test(path, header):
+    elif _is_test(path, header, root=root):
         kind = FileKind.TEST
     else:
         kind = FileKind.PRODUCTION

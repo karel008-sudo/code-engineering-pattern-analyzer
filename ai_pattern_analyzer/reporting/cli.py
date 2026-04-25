@@ -63,11 +63,15 @@ def print_repo_summary(stats: RepoStats, use_color: bool = True) -> None:
     print(f"  Analyzer: {ANALYZER_VERSION}  |  Scoring model: {SCORING_MODEL_VERSION}")
     print("═" * w)
 
-    # KPI score (adjusted, production logic)
+    # v5.0: AI-Adoption Pattern Index (fixed naming, not "AI-generated files %")
     bar_w = 40
     kpi_filled = int(stats.kpi_score * bar_w)
+    kpi_band = "LOW" if stats.kpi_score < 0.26 else "MODERATE" if stats.kpi_score < 0.51 else "ELEVATED" if stats.kpi_score < 0.76 else "HIGH"
     bar = "▓" * kpi_filled + "░" * (bar_w - kpi_filled)
-    print(f"  AI-Adoption KPI Score:    {stats.kpi_score * 100:5.1f}%  [{bar}]  (adjusted, prod logic)")
+    print(f"  AI-Adoption Pattern Index: {stats.kpi_score * 100:5.1f}% [{kpi_band}]  [{bar}]")
+    print(f"  ⚠ This is NOT a percentage of AI-generated files.")
+    print(f"    It is a directional KPI based on code pattern signals.")
+    print()
 
     # Raw likelihood
     lh_filled = int(stats.median_likelihood * bar_w)
@@ -79,6 +83,18 @@ def print_repo_summary(stats: RepoStats, use_color: bool = True) -> None:
           f"  |  Generated excluded: {stats.exclusions.get('generated_excluded', 0)}"
           f"  |  KPI-eligible: {stats.exclusions.get('kpi_eligible', 0)}")
     print()
+
+    # v5.0: AI Origin Estimate
+    if stats.origin_estimate:
+        oe = stats.origin_estimate
+        print(f"  ── AI Origin Estimate (heuristic estimate, not forensic proof) ──")
+        print(f"  Estimated fully AI-generated: {oe.fully_ai_generated_pct:5.1f}%"
+              f"  confidence: {oe.confidence}")
+        print(f"  Estimated AI-assisted:        {oe.ai_assisted_pct:5.1f}%")
+        print(f"  Estimated human-authored:     {oe.human_authored_pct:5.1f}%")
+        total_check = oe.fully_ai_generated_pct + oe.ai_assisted_pct + oe.human_authored_pct
+        print(f"  (Sum: {total_check:.1f}% — directional estimates, not exact proof)")
+        print()
 
     # File counts
     print(f"  Files: {stats.production_files} production | "
@@ -227,4 +243,78 @@ def print_multi_repo_table(all_stats: List[RepoStats]) -> None:
     avg_kpi     = sum(s.kpi_score for s in all_stats) / max(len(all_stats), 1)
     print(f"║  {'TOTAL / AVERAGE':<25}  {avg_kpi:>4.1%}  {overall_pct:>7.1f}%  "
           f"{'':>5}  {'':>5}  {total_files:>5}  {'':20}  ║")
+    print("╠" + "═" * (w - 2) + "╣")
+    print(f"║  ⚠ AI-Adoption Pattern Index is NOT '% of files written by AI'.{' '*(w-69)}║")
+    print(f"║    It is a directional code-pattern signal — see README for interpretation.{' '*(w-79)}║")
     print("╚" + "═" * (w - 2) + "╝")
+
+
+def print_repo_origin_estimate(stats: RepoStats, use_color: bool = True) -> None:
+    """Print a detailed AI Origin Estimate for a repository (--explain-repo mode)."""
+    w = _TERM_WIDTH
+    print()
+    print("═" * w)
+    print(f"  AI Origin Estimate — {stats.repo_name}")
+    print(f"  ⚠ Heuristic estimate, NOT forensic proof of AI authorship")
+    print("═" * w)
+
+    if not stats.origin_estimate:
+        print("  No origin estimate available (insufficient data or no files analyzed).")
+        print("═" * w)
+        return
+
+    oe = stats.origin_estimate
+
+    print(f"""
+  Estimated origin distribution:
+  ─────────────────────────────────────────────────────────────────
+  Fully AI-generated: {oe.fully_ai_generated_pct:5.1f}%    confidence: {oe.confidence:<8}  (AI generated in one shot)
+  AI-assisted:        {oe.ai_assisted_pct:5.1f}%    confidence: {oe.confidence:<8}  (Copilot-like assistance)
+  Human-authored:     {oe.human_authored_pct:5.1f}%    confidence: {oe.confidence:<8}  (hand-written code)
+  ─────────────────────────────────────────────────────────────────
+  Note: Three percentages sum to 100%. These are directional estimates.
+        Vendor/generated files excluded from KPI.
+""")
+
+    # Confidence intervals
+    if oe.intervals:
+        print("  Confidence intervals:")
+        for key, interval in oe.intervals.items():
+            if hasattr(interval, 'low'):
+                print(f"    {key:<25} {interval.low:.1f}% – {interval.high:.1f}%")
+    print()
+
+    # Drivers
+    if oe.drivers:
+        print("  Key drivers:")
+        for d in oe.drivers:
+            print(f"    • {d}")
+    print()
+
+    # Uncertainty
+    if oe.uncertainty_reasons:
+        print("  Uncertainty reasons:")
+        for r in oe.uncertainty_reasons:
+            print(f"    ⚠ {r}")
+    print()
+
+    # Interpretation guidance
+    print("  Interpretation:")
+    print(f"  AI-Adoption Pattern Index: {stats.kpi_score*100:.1f}%")
+    if stats.kpi_score < 0.26:
+        print("  → Low AI-like signal density. Consistent with established codebases")
+        print("    with strong human-authorship signals.")
+    elif stats.kpi_score < 0.51:
+        print("  → Moderate AI-like patterns. May reflect clean code, formatters,")
+        print("    framework conventions, or moderate AI-assisted development.")
+    elif stats.kpi_score < 0.76:
+        print("  → Elevated AI-like patterns. Warrants contextual review.")
+    else:
+        print("  → High AI-like pattern density. Strong candidate for review.")
+        print("    Check for generated clients, DTOs, or scaffold generation.")
+
+    print()
+    print("  Caveats:")
+    for c in oe.caveats:
+        print(f"    • {c}")
+    print("═" * w)

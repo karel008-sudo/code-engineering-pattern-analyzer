@@ -125,6 +125,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--debug-rules", action="store_true",
                    help="Show signal values per file.")
 
+    # ── v5.0 new flags ────────────────────────────────────────────────────────
+    p.add_argument("--explain", metavar="FILE",
+                   help="Show full explanation for a specific file (explain-file mode).")
+    p.add_argument("--explain-repo", action="store_true",
+                   help="Show detailed repository explanation with AI Origin Estimate.")
+    p.add_argument("--diff-mode", action="store_true",
+                   help="[Extension point] Analyze only changed files (requires --base/--head).")
+    p.add_argument("--base", metavar="REF", default="main",
+                   help="Base ref for diff mode (default: main).")
+    p.add_argument("--head", metavar="REF", default="HEAD",
+                   help="Head ref for diff mode (default: HEAD).")
+    p.add_argument("--changed-only", action="store_true",
+                   help="[Extension point] Scan only files changed since --base.")
+    p.add_argument("--include-generated-in-kpi", action="store_true",
+                   help="Include generated files in KPI calculation (default: excluded).")
+    p.add_argument("--include-vendor-in-kpi", action="store_true",
+                   help="Include vendor files in KPI calculation (default: excluded).")
+    p.add_argument("--compare", metavar="FILE",
+                   help="[Extension point] Compare against a previous scan JSON for delta.")
+
     return p
 
 
@@ -157,6 +177,7 @@ def _build_worker_args(
             _is_critical(str(df.path)),
             has_git,
             df.module_path,
+            True,  # enable_v5_analyzers: always True in v5.0
         )
         for df in discovered_files
     ]
@@ -274,6 +295,111 @@ def _apply_similarity(
             results[idx] = updated
 
 
+# ── Explain-file mode ─────────────────────────────────────────────────────────
+
+def _explain_file(
+    file_path: str,
+    all_analyses: Dict[str, List[FileAnalysis]],
+    no_color: bool,
+) -> None:
+    """Print a full explanation for a specific file."""
+    target = Path(file_path).resolve()
+    found = None
+    for analyses in all_analyses.values():
+        for a in analyses:
+            if Path(a.path).resolve() == target or a.path.endswith(file_path):
+                found = a
+                break
+        if found:
+            break
+
+    if not found:
+        print(f"File not found in scan results: {file_path}", file=sys.stderr)
+        print("Tip: make sure the file is within the --dirs you scanned.", file=sys.stderr)
+        return
+
+    a = found
+    W = "\033[0m" if not no_color else ""
+    BOLD = "\033[1m" if not no_color else ""
+    CYAN = "\033[96m" if not no_color else ""
+    YELLOW = "\033[93m" if not no_color else ""
+    RED = "\033[91m" if not no_color else ""
+    GREEN = "\033[92m" if not no_color else ""
+
+    print(f"\n{BOLD}{'─'*70}{W}")
+    print(f"{BOLD}Explain File: {CYAN}{a.path}{W}")
+    print(f"{'─'*70}{W}")
+    print(f"  Language:      {a.language}")
+    print(f"  Category:      {a.category.value}")
+    print(f"  Lines:         {a.lines}")
+    print(f"  Module:        {a.module_path or '(root)'}")
+    print()
+
+    # Scores
+    print(f"{BOLD}Scores:{W}")
+    print(f"  AI-Pattern Index (adj):  {a.adjusted_score:.1%}  [{a.score_band.upper()}]")
+    print(f"  Raw AI-like likelihood:  {a.ai_likelihood:.1%}")
+    print(f"  Risk score:              {a.risk_score:.1%}")
+    print(f"  Signal confidence:       {a.confidence:.1%}")
+    print(f"  Classification:          {a.classification}")
+    print()
+    print(f"  ⚠ AI-Adoption Pattern Index is NOT a percentage of AI-generated code.")
+    print(f"  ⚠ It reflects code style patterns, not verified authorship.")
+    print()
+
+    # Origin Estimate
+    if a.origin_estimate:
+        oe = a.origin_estimate
+        print(f"{BOLD}AI Origin Estimate  (heuristic estimate, not forensic proof):{W}")
+        ai_col = RED if oe.fully_ai_generated_pct > 30 else YELLOW
+        h_col  = GREEN if oe.human_authored_pct > 50 else W
+        print(f"  {ai_col}Estimated fully AI-generated: {oe.fully_ai_generated_pct:.1f}%{W}"
+              f"  [{oe.intervals.get('fully_ai_generated', '')}]")
+        print(f"  {YELLOW}Estimated AI-assisted:        {oe.ai_assisted_pct:.1f}%{W}"
+              f"  [{oe.intervals.get('ai_assisted', '')}]")
+        print(f"  {h_col}Estimated human-authored:     {oe.human_authored_pct:.1f}%{W}"
+              f"  [{oe.intervals.get('human_authored', '')}]")
+        print(f"  Confidence: {oe.confidence}  ({oe.confidence_level:.2f})")
+        print()
+        if oe.drivers:
+            print(f"{BOLD}Key drivers:{W}")
+            for d in oe.drivers:
+                print(f"  • {d}")
+            print()
+        if oe.uncertainty_reasons:
+            print(f"{BOLD}Uncertainty reasons:{W}")
+            for r in oe.uncertainty_reasons:
+                print(f"  ⚠ {r}")
+            print()
+
+    # Top signals
+    if a.top_signals:
+        print(f"{BOLD}Top contributing signals:{W}")
+        for sig, val in a.top_signals.items():
+            bar = "█" * int(val * 15)
+            print(f"  {sig:<32} {val:.3f}  {bar}")
+        print()
+
+    # Findings
+    if a.findings:
+        print(f"{BOLD}Findings ({len(a.findings)}):{W}")
+        for f in a.findings[:5]:
+            sev_color = RED if f.severity == "high" else YELLOW if f.severity == "moderate" else W
+            print(f"  {sev_color}[{f.severity.upper()}]{W} {f.rule_id}: {f.description}")
+            if f.alternative_explanations:
+                ae = f.alternative_explanations[0]
+                print(f"          Alternative: {ae.explanation} (likelihood: {ae.likelihood})")
+        print()
+
+    # Review recommendation
+    print(f"{BOLD}Review recommendation:{W} {a.review_recommendation}")
+    if a.uncertainty_reasons:
+        print(f"\n{BOLD}Uncertainty reasons:{W}")
+        for r in a.uncertainty_reasons:
+            print(f"  ⚠ {r}")
+    print(f"\n{'─'*70}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -359,6 +485,17 @@ def main() -> None:
     if not all_repo_stats:
         print("No files analyzed.", file=sys.stderr)
         sys.exit(1)
+
+    # ── v5.0: Explain-file mode ───────────────────────────────────────────────
+    if hasattr(args, "explain") and args.explain:
+        _explain_file(args.explain, all_analyses, args.no_color)
+        sys.exit(0)
+
+    # ── v5.0: Explain-repo mode ───────────────────────────────────────────────
+    if hasattr(args, "explain_repo") and args.explain_repo:
+        for stats in all_repo_stats:
+            cli_reporter.print_repo_origin_estimate(stats, use_color=not args.no_color)
+        sys.exit(0)
 
     # ── Output ────────────────────────────────────────────────────────────────
     if output_fmt == "table":

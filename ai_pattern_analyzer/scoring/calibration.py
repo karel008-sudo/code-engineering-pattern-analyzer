@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .model import FileAnalysis
-from ..domain import FileCategory
+from ..domain import FileCategory, OriginEstimate
 
 
 # ── Module summary ─────────────────────────────────────────────────────────────
@@ -111,6 +111,9 @@ class RepoStats:
     mixed_count: int
     uncertain_count: int
 
+    # v5.0: AI Origin Estimate (three-way probability for whole repo)
+    origin_estimate: Optional[OriginEstimate] = None
+
     # Top files
     top_ai_files: List[FileAnalysis] = field(default_factory=list)
     top_risk_files: List[FileAnalysis] = field(default_factory=list)
@@ -172,6 +175,7 @@ class RepoStats:
             "module_summaries":  [m.as_dict() for m in self.module_summaries],
             "category_summaries": [c.as_dict() for c in self.category_summaries],
             "git_signals":       self.git_signals,
+            "origin_estimate":   self.origin_estimate.as_dict() if self.origin_estimate else None,
         }
 
 
@@ -354,6 +358,9 @@ def calibrate_repo(
 
     data_quality = _compute_data_quality(analyses, has_git=has_git, has_ast=has_ast)
 
+    # v5.0: Aggregate origin estimates weighted by LOC
+    origin_estimate = _aggregate_origin_estimates(kpi_eligible)
+
     return RepoStats(
         repo_name=repo_name,
         total_files=len(analyses),
@@ -383,7 +390,24 @@ def calibrate_repo(
         category_summaries=category_summaries,
         data_quality_score=data_quality,
         exclusions=exclusions,
+        origin_estimate=origin_estimate,
     )
+
+
+def _aggregate_origin_estimates(analyses: List[FileAnalysis]) -> Optional[OriginEstimate]:
+    """Aggregate per-file OriginEstimates into a repo-level estimate weighted by LOC."""
+    try:
+        from ..origin.engine import aggregate_origin_estimates
+        pairs = [
+            (a.origin_estimate, a.lines)
+            for a in analyses
+            if a.origin_estimate is not None and a.lines > 0
+        ]
+        if not pairs:
+            return None
+        return aggregate_origin_estimates(pairs)
+    except Exception:
+        return None
 
 
 def assign_percentile_tier(analysis: FileAnalysis, repo_stats: RepoStats) -> str:

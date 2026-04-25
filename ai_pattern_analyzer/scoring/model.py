@@ -1,11 +1,14 @@
 """
 scoring/model.py — Non-linear scoring model with calibrated confidence.
 
+v5.0 additions:
+  - FileAnalysis now carries origin_estimate (three-way AI/human probability)
+  - scaffold_score, style_continuity, magic_number_score, name_body_coherence
+    computed in pipeline.py and passed into score_file()
+
 v4.0 additions:
   - FileAnalysis now carries category, adjusted_score, risk_score,
     score_breakdown, framework_context, findings, uncertainty_reasons
-  - Scoring model version and ruleset version in output
-  - Alternative explanations for elevated signals
 
 Design principles:
   - Non-linear signal aggregation (power scaling)
@@ -14,8 +17,9 @@ Design principles:
   - Classification uses confidence-gated thresholds
   - raw_score = heuristic aggregate; adjusted_score = context-aware
 
-⚠ OUTPUT DISCLAIMER: ai_likelihood / adjusted_score are probabilistic
-  pattern signals, NOT proof of AI authorship. Results are indicative only.
+⚠ OUTPUT DISCLAIMER: ai_likelihood / adjusted_score and origin_estimate are
+  probabilistic pattern signals, NOT proof of AI authorship. Results are
+  directional estimates only.
 """
 from __future__ import annotations
 
@@ -34,6 +38,7 @@ from ..config import (
 from ..domain import (
     FileCategory,
     FrameworkContext,
+    OriginEstimate,
     ScoreBreakdown,
     Finding,
     AlternativeExplanation,
@@ -91,6 +96,13 @@ class FileAnalysis:
     uncertainty_reasons: List[str] = field(default_factory=list)
     module_path: str = ""
 
+    # v5.0 fields
+    origin_estimate: Optional[OriginEstimate] = None  # three-way AI/human probability
+    scaffold_score: float = 0.0        # scaffold completeness [0.0, 1.0]
+    style_continuity: float = 1.0      # style continuity [0.0, 1.0]
+    magic_number_score: float = 0.5    # magic number discipline [0.0, 1.0]
+    name_body_coherence: float = 0.5   # name-to-body coherence [0.0, 1.0]
+
     @property
     def score_band(self) -> str:
         return score_band_from_likelihood(self.adjusted_score)
@@ -130,6 +142,8 @@ class FileAnalysis:
             d["score_breakdown"] = self.score_breakdown.as_dict()
         if self.framework_context:
             d["framework_context"] = self.framework_context.as_dict()
+        if self.origin_estimate:
+            d["origin_estimate"] = self.origin_estimate.as_dict()
         d["findings"] = [f.as_dict() for f in self.findings]
         return d
 
@@ -241,6 +255,11 @@ def score_file(
     is_critical_path: bool = False,
     has_git: bool = False,
     module_path: str = "",
+    # v5.0 origin estimate inputs
+    scaffold_score: float = 0.0,
+    style_continuity: float = 1.0,
+    magic_number_score: float = 0.5,
+    name_body_coherence: float = 0.5,
 ) -> FileAnalysis:
     """
     Aggregate signals into a scored FileAnalysis.
@@ -248,6 +267,9 @@ def score_file(
     signals:      dict of ALL_SIGNAL_KEYS → float [0.0, 1.0]
     category:     semantic file category (affects adjusted score)
     framework_ctx: detected framework context (affects adjusted score)
+
+    v5.0: scaffold_score, style_continuity, magic_number_score, name_body_coherence
+    are passed from pipeline.py to compute the OriginEstimate (three-way probability).
 
     Missing signal keys default to 0.40 (neutral).
     """
@@ -309,7 +331,8 @@ def score_file(
     # Build findings
     findings = _build_findings(full_signals, contributions, language, framework_ctx)
 
-    return FileAnalysis(
+    # v5.0: Build partial FileAnalysis first, then compute OriginEstimate
+    analysis = FileAnalysis(
         path=str(path),
         language=language,
         kind=kind,
@@ -329,4 +352,24 @@ def score_file(
         findings=findings,
         uncertainty_reasons=score_breakdown.uncertainty_reasons,
         module_path=module_path,
+        # v5.0 fields
+        scaffold_score=scaffold_score,
+        style_continuity=style_continuity,
+        magic_number_score=magic_number_score,
+        name_body_coherence=name_body_coherence,
     )
+
+    # v5.0: Compute OriginEstimate (three-way probability)
+    try:
+        from ..origin.engine import compute_file_origin
+        analysis.origin_estimate = compute_file_origin(
+            file_analysis=analysis,
+            scaffold_score=scaffold_score,
+            style_continuity=style_continuity,
+            magic_number_score=magic_number_score,
+            name_body_coherence=name_body_coherence,
+        )
+    except Exception:
+        pass  # Origin estimate is optional; never fail the whole scan
+
+    return analysis

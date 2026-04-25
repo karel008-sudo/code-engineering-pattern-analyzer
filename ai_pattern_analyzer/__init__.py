@@ -30,7 +30,7 @@ Run:  python -m ai_pattern_analyzer --dirs ./repo --help
       python -m ai_pattern_analyzer --generate-config
 """
 
-__version__ = "4.0.0"
+__version__ = "5.0.0"
 __author__  = "GPC Platform Team"
 
 from .config import ANALYZER_VERSION, SCORING_MODEL_VERSION, RULESET_VERSION

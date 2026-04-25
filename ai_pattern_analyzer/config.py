@@ -6,17 +6,20 @@ Signal values are normalized to [0.0, 1.0] where 1.0 = AI-like pattern.
 
 v4.0: Added scoring model version, ruleset version, extended signal keys,
       new heuristic signals (placeholder, test_quality, framework signals).
+
+v5.0: Added Kotlin-native signal keys, scaffold/style signals, WEIGHTS_KOTLIN,
+      GIT_BURST_HUMAN_KEYWORDS, updated versioning. Added .kts extension.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, FrozenSet
 
 # ── Analyzer versioning ────────────────────────────────────────────────────────
 
-ANALYZER_VERSION       = "4.0.0"
-SCORING_MODEL_VERSION  = "4.0"
-RULESET_VERSION        = "4.0"
+ANALYZER_VERSION       = "5.0.0"
+SCORING_MODEL_VERSION  = "5.0"
+RULESET_VERSION        = "5.0"
 
 # ── File filtering ────────────────────────────────────────────────────────────
 
@@ -25,6 +28,9 @@ SKIP_DIRS: frozenset = frozenset({
     ".venv", "venv", ".gradle", "generated", "coverage", ".mvn",
     "vendor", "third_party", "thirdparty", ".idea", ".vscode",
     ".pytest_cache", ".mypy_cache", "site-packages", "dist-packages",
+    # v5.0 additions
+    "proto", "grpc", "avro", "swagger", "openapi",
+    "Pods", "Carthage", "deps",
 })
 
 MAX_FILE_BYTES: int = 512 * 1024
@@ -33,7 +39,8 @@ MIN_LINES: int = 10
 # ── Language mapping ──────────────────────────────────────────────────────────
 
 EXTENSION_TO_LANG: Dict[str, str] = {
-    ".java":  "Java",   ".kt":    "Kotlin",  ".scala": "Scala",
+    ".java":  "Java",   ".kt":    "Kotlin",  ".kts":   "KotlinScript",
+    ".scala": "Scala",
     ".py":    "Python", ".ts":    "TypeScript", ".tsx":   "TypeScript",
     ".vue":   "Vue",    ".js":    "JavaScript", ".jsx":   "JavaScript",
     ".go":    "Go",     ".rs":    "Rust",    ".cs":    "CSharp",
@@ -84,6 +91,15 @@ ALL_SIGNAL_KEYS = [
     "intra_file_variance",     # uniform methods across file = AI-like
     # Repo-level (injected after cross-file analysis)
     "similarity_cluster",      # high cross-file similarity = AI-like
+    # v5.0: Scaffold / structural coherence signals
+    "scaffold_completeness",   # uniform scaffold structure = AI-like
+    "magic_number_discipline", # low magic numbers = AI-like (or senior dev)
+    "name_body_coherence",     # names match body = AI-like descriptive naming
+    "style_continuity",        # continuous style = slightly AI-like
+    "human_irregularity",      # human patterns = human signal (inverted: 1 - value)
+    # v5.0: Kotlin-native signals (LOW AI weights — idiomatic Kotlin)
+    "kotlin_data_class",       # Kotlin data classes = LOW AI signal (idiomatic)
+    "kotlin_coroutines",       # Kotlin coroutines = contextual signal
 ]
 
 
@@ -199,16 +215,70 @@ WEIGHTS_DEFAULT = LanguageWeights("default", _w(
     prompt_residue        = 0.01,
 ))
 
+# ── Kotlin-specific weights (v5.0) ─────────────────────────────────────────────
+# Key decisions:
+#   - kotlin_data_class weight = 0.01 (idiomatic, NOT an AI indicator)
+#   - kotlin_coroutines weight = 0.01 (contextual, not decisive)
+#   - Adapted from WEIGHTS_JAVA but tuned for Kotlin idioms
+#   - Total must sum to 1.0
+
+WEIGHTS_KOTLIN = LanguageWeights("Kotlin", _w(
+    # Primary signals — same as Java (strongest separators)
+    docstring_quality     = 0.13,
+    stream_usage          = 0.11,
+    comment_density       = 0.11,
+    log_quality           = 0.09,
+    error_message_quality = 0.07,
+    # Secondary signals
+    token_entropy         = 0.06,
+    optional_usage        = 0.05,
+    empty_catch           = 0.05,
+    similarity_cluster    = 0.04,
+    # Weak signals
+    final_fields          = 0.03,
+    type_token_ratio      = 0.03,
+    repetition_index      = 0.02,
+    function_name_length  = 0.01,
+    # v4.0 signals
+    motif_uniformity      = 0.04,
+    intra_file_variance   = 0.03,
+    prompt_residue        = 0.01,
+    placeholder_density   = 0.01,
+    # v5.0 scaffold signals (moderate weight — supporting evidence)
+    scaffold_completeness   = 0.04,
+    magic_number_discipline = 0.02,
+    name_body_coherence     = 0.02,
+    style_continuity        = 0.01,
+    # v5.0 Kotlin-native signals — VERY LOW weights (idiomatic constructs)
+    kotlin_data_class  = 0.01,   # idiomatic Kotlin — do NOT penalise
+    kotlin_coroutines  = 0.01,   # contextual — not decisive
+))
+
 LANG_WEIGHTS: Dict[str, LanguageWeights] = {
-    "Python":     WEIGHTS_PYTHON,
-    "Java":       WEIGHTS_JAVA,
-    "Kotlin":     WEIGHTS_JAVA,
-    "Scala":      WEIGHTS_JAVA,
-    "TypeScript": WEIGHTS_TYPESCRIPT,
-    "Vue":        WEIGHTS_TYPESCRIPT,
-    "JavaScript": WEIGHTS_TYPESCRIPT,
+    "Python":       WEIGHTS_PYTHON,
+    "Java":         WEIGHTS_JAVA,
+    "Kotlin":       WEIGHTS_KOTLIN,
+    "KotlinScript": WEIGHTS_KOTLIN,
+    "Scala":        WEIGHTS_JAVA,
+    "TypeScript":   WEIGHTS_TYPESCRIPT,
+    "Vue":          WEIGHTS_TYPESCRIPT,
+    "JavaScript":   WEIGHTS_TYPESCRIPT,
 }
 
 
 def get_weights(lang: str) -> LanguageWeights:
     return LANG_WEIGHTS.get(lang, WEIGHTS_DEFAULT)
+
+
+# ── Git burst human keywords (v5.0) ───────────────────────────────────────────
+# Commit messages containing these keywords often indicate human-driven operations:
+# bulk imports, migrations, reformatting, vendor syncs, and cherry-picks.
+# These are used to down-weight AI-like signals in files that were recently
+# touched by a "human-pattern" commit.
+
+GIT_BURST_HUMAN_KEYWORDS: FrozenSet[str] = frozenset({
+    "initial import", "cvs", "svn", "migrate", "migration",
+    "move", "rename", "refactor", "reformat", "format",
+    "cleanup", "generated", "regenerate", "vendored",
+    "import source", "sync", "mirror", "cherry-pick", "squash",
+})

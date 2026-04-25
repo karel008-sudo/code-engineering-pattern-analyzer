@@ -26,13 +26,37 @@ def git_burst_score(commits: List[CommitRecord]) -> float:
     """
     Detect large LOC additions in short time windows (AI generation bursts).
     Returns [0.0, 1.0] where 1.0 = strong burst pattern.
+
+    v5.0: Improved to reduce false positives for:
+    - Initial repository imports
+    - CVS/SVN migrations
+    - Large refactoring commits
+    - Generated code updates
+    - Vendor syncs
+    If commit messages indicate these patterns, burst score is reduced.
     """
     if len(commits) < 3:
         return 0.30
 
+    # v5.0: Detect import/migration/refactor commits and exclude them from burst analysis
+    filtered_commits = []
+    migration_detected = False
+    for c in commits:
+        if _IMPORT_MIGRATION_KEYWORDS.search(c.subject or ""):
+            migration_detected = True
+            continue  # skip non-AI burst commits
+        filtered_commits.append(c)
+
+    # If most commits are migration-like, return very low burst score
+    if len(filtered_commits) < len(commits) * 0.5:
+        return 0.15  # mostly migration/import commits — not AI burst
+
+    # Use filtered commits for burst detection
+    analysis_commits = filtered_commits if filtered_commits else commits
+
     # Group commits by day
     by_day: Dict[int, int] = defaultdict(int)
-    for c in commits:
+    for c in analysis_commits:
         day = c.timestamp // 86400
         by_day[day] += c.insertions
 
@@ -106,6 +130,20 @@ _AI_MSG_PATTERNS = re.compile(
 _HUMAN_MSG_PATTERNS = re.compile(
     r"(?:WIP|wip|todo|FIXME|fixme|hotfix|HOTFIX|oops|typo|"
     r"[A-Z]{2,}-\d+|#\d+|JIRA|ticket|revert|merge|Merge|bump)",
+    re.I,
+)
+
+# v5.0: Non-AI burst keywords — large commits with these messages are NOT AI bursts
+# They indicate: initial import, migration, refactoring, regeneration, etc.
+_IMPORT_MIGRATION_KEYWORDS = re.compile(
+    r"(?:initial\s+(?:import|commit|setup)|"
+    r"cvs|svn|import\s+(?:source|from)|"
+    r"(?:migrate|migration|move|rename|refactor|reformat|format)(?:d|ing)?\b|"
+    r"cleanup|clean.?up|"
+    r"regenerate|generated\s+(?:by|from)|"
+    r"vendored?|vendor|third.?party|"
+    r"sync(?:hronize)?|mirror|"
+    r"cherry.pick|squash)",
     re.I,
 )
 
