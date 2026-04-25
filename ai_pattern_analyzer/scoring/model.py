@@ -1,76 +1,155 @@
 """
 scoring/model.py — Non-linear scoring model with calibrated confidence.
 
+v4.0 additions:
+  - FileAnalysis now carries category, adjusted_score, risk_score,
+    score_breakdown, framework_context, findings, uncertainty_reasons
+  - Scoring model version and ruleset version in output
+  - Alternative explanations for elevated signals
+
 Design principles:
   - Non-linear signal aggregation (power scaling)
   - Sigmoid output for smooth 0–1 likelihood
   - Confidence from signal agreement, not just magnitude
   - Classification uses confidence-gated thresholds
+  - raw_score = heuristic aggregate; adjusted_score = context-aware
 
-⚠ OUTPUT DISCLAIMER: ai_likelihood is a probabilistic pattern score,
-NOT a proof of AI authorship. Results are indicative only.
+⚠ OUTPUT DISCLAIMER: ai_likelihood / adjusted_score are probabilistic
+  pattern signals, NOT proof of AI authorship. Results are indicative only.
 """
 from __future__ import annotations
+
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from ..config import ALL_SIGNAL_KEYS, get_weights
+from ..config import (
+    ALL_SIGNAL_KEYS,
+    ANALYZER_VERSION,
+    SCORING_MODEL_VERSION,
+    RULESET_VERSION,
+    get_weights,
+)
+from ..domain import (
+    FileCategory,
+    FrameworkContext,
+    ScoreBreakdown,
+    Finding,
+    AlternativeExplanation,
+    Evidence,
+    score_band_from_likelihood,
+    review_recommendation,
+)
+from .adjusted import build_score_breakdown
 
 
-POWER_EXPONENT = 1.15   # non-linear scaling: contribution = w * s^1.15
-SIGMOID_STEEPNESS = 7.0  # sigmoid sharpness around 0.5
+POWER_EXPONENT    = 1.15   # non-linear scaling: contribution = w * s^1.15
+SIGMOID_STEEPNESS = 7.0    # sigmoid sharpness around 0.5
 
 # Classification thresholds (applied after confidence gating)
 THRESH_AI_HIGH    = 0.68
 THRESH_AI_LOW     = 0.62
 THRESH_HUMAN_HIGH = 0.32
 THRESH_HUMAN_LOW  = 0.38
-MIN_CONFIDENCE    = 0.45  # below this → "uncertain" regardless of likelihood
+MIN_CONFIDENCE    = 0.45   # below this → "uncertain" regardless of likelihood
 
 
 @dataclass
 class FileAnalysis:
-    """Complete analysis result for a single file."""
+    """
+    Complete analysis result for a single file.
+
+    v4.0 additions:
+      - category: semantic file category (production_logic, dto, test, etc.)
+      - adjusted_score: raw_score adjusted for category/framework context
+      - risk_score: engineering review priority (≠ AI-likeness)
+      - score_breakdown: detailed breakdown with uncertainty reasons
+      - framework_context: detected frameworks and boilerplate context
+      - findings: list of individual rule findings with evidence
+      - uncertainty_reasons: human-readable confidence reduction reasons
+      - module_path: relative module/package path
+    """
     path: str
     language: str
-    kind: str                      # production | test
+    kind: str                          # "production" | "test" (legacy, kept for compat)
     lines: int
-    signals: Dict[str, float]      # all signal values [0.0, 1.0]
-    raw_score: float               # weighted non-linear aggregate [0.0, 1.0]
-    ai_likelihood: float           # sigmoid-mapped [0.0, 1.0]
-    confidence: float              # signal agreement [0.0, 1.0]
-    classification: str            # AI-like | human-like | mixed | uncertain
-    top_signals: Dict[str, float]  # top-3 contributing signals
+    signals: Dict[str, float]          # all signal values [0.0, 1.0]
+    raw_score: float                   # weighted non-linear aggregate [0.0, 1.0]
+    ai_likelihood: float               # sigmoid-mapped raw score [0.0, 1.0]
+    confidence: float                  # signal agreement [0.0, 1.0]
+    classification: str                # AI-like | human-like | mixed | uncertain
+    top_signals: Dict[str, float]      # top-4 contributing signals
 
-    def as_dict(self) -> dict:
-        return {
-            "path":           self.path,
-            "language":       self.language,
-            "kind":           self.kind,
-            "lines":          self.lines,
-            "ai_likelihood":  round(self.ai_likelihood, 3),
-            "confidence":     round(self.confidence, 3),
-            "classification": self.classification,
-            "raw_score":      round(self.raw_score, 3),
-            "top_signals":    {k: round(v, 3) for k, v in self.top_signals.items()},
-            "all_signals":    {k: round(v, 3) for k, v in self.signals.items()},
+    # v4.0 fields
+    category: FileCategory = FileCategory.UNKNOWN
+    adjusted_score: float = 0.0        # context-adjusted score [0.0, 1.0]
+    risk_score: float = 0.0            # engineering review risk [0.0, 1.0]
+    score_breakdown: Optional[ScoreBreakdown] = None
+    framework_context: Optional[FrameworkContext] = None
+    findings: List[Finding] = field(default_factory=list)
+    uncertainty_reasons: List[str] = field(default_factory=list)
+    module_path: str = ""
+
+    @property
+    def score_band(self) -> str:
+        return score_band_from_likelihood(self.adjusted_score)
+
+    @property
+    def review_recommendation(self) -> str:
+        return review_recommendation(
+            self.adjusted_score, self.risk_score, self.category, self.confidence
+        )
+
+    def as_dict(self, include_snippets: bool = False) -> Dict[str, Any]:
+        d: Dict[str, Any] = {
+            "path":              self.path,
+            "language":          self.language,
+            "category":          self.category.value,
+            "kind":              self.kind,
+            "lines":             self.lines,
+            "module_path":       self.module_path,
+            # Scores
+            "ai_likelihood":     round(self.ai_likelihood, 3),
+            "adjusted_score":    round(self.adjusted_score, 3),
+            "risk_score":        round(self.risk_score, 3),
+            "confidence":        round(self.confidence, 3),
+            "score_band":        self.score_band,
+            "classification":    self.classification,
+            "raw_score":         round(self.raw_score, 3),
+            # Explainability
+            "top_signals":       {k: round(v, 3) for k, v in self.top_signals.items()},
+            "all_signals":       {k: round(v, 3) for k, v in self.signals.items()},
+            "findings_count":    len(self.findings),
+            "uncertainty_reasons": self.uncertainty_reasons,
+            "review_recommendation": self.review_recommendation,
+            # Versioning
+            "scoring_model_version": SCORING_MODEL_VERSION,
         }
+        if self.score_breakdown:
+            d["score_breakdown"] = self.score_breakdown.as_dict()
+        if self.framework_context:
+            d["framework_context"] = self.framework_context.as_dict()
+        d["findings"] = [f.as_dict() for f in self.findings]
+        return d
 
 
 def _sigmoid(x: float, k: float = SIGMOID_STEEPNESS) -> float:
-    """Sigmoid function: maps any real to (0, 1). Centered at x=0.5."""
+    """Sigmoid function mapping any real to (0, 1), centered at x=0.5."""
     try:
         return 1.0 / (1.0 + math.exp(-k * (x - 0.5)))
     except OverflowError:
         return 0.0 if x < 0.5 else 1.0
 
 
-def _signal_agreement(signals: Dict[str, float], weights: object, raw_score: float) -> float:
+def _signal_agreement(
+    signals: Dict[str, float],
+    weights: object,
+    raw_score: float,
+) -> float:
     """
-    Confidence = fraction of weighted signal mass that agrees with the raw_score direction.
-    If raw_score > 0.5 (AI-leaning): what fraction of weighted signals are also > 0.5?
+    Confidence = fraction of weighted signal mass that agrees with direction.
+    If raw_score > 0.5 (AI-leaning): what fraction of weighted signals are > 0.5?
     """
     direction = raw_score > 0.5
     total_weight = 0.0
@@ -89,18 +168,88 @@ def _signal_agreement(signals: Dict[str, float], weights: object, raw_score: flo
     return agreeing_weight / total_weight
 
 
+def _build_findings(
+    signals: Dict[str, float],
+    contributions: Dict[str, float],
+    language: str,
+    framework_ctx: Optional[FrameworkContext],
+) -> List[Finding]:
+    """
+    Build Finding objects from signal contributions.
+    Findings are generated for signals that exceed a contribution threshold.
+    """
+    from .._signal_metadata import SIGNAL_METADATA
+
+    findings = []
+    fw_explanations = []
+    if framework_ctx:
+        from ..analyzers.framework import get_alternative_explanations
+        fw_explanations = get_alternative_explanations(framework_ctx)
+
+    for key, contribution in sorted(contributions.items(), key=lambda x: -x[1]):
+        if contribution < 0.01:
+            continue
+
+        sig_value = signals.get(key, 0.0)
+        if sig_value < 0.35:
+            continue
+
+        meta = SIGNAL_METADATA.get(key, {})
+        severity = "info"
+        if contribution > 0.06:
+            severity = "high"
+        elif contribution > 0.03:
+            severity = "moderate"
+        elif contribution > 0.01:
+            severity = "low"
+
+        evidence = [Evidence(
+            kind="statistic",
+            description=f"Signal value: {sig_value:.2f}, weight contribution: {contribution:.3f}",
+            value=sig_value,
+        )]
+
+        # Combine framework and signal-specific alternative explanations
+        alt_explanations = list(fw_explanations)
+        for ae in meta.get("alternative_explanations", []):
+            alt_explanations.append(AlternativeExplanation(ae[0], ae[1]))
+
+        finding = Finding(
+            rule_id=f"signal.{key}",
+            category=meta.get("category", "heuristic"),
+            description=meta.get("description", key.replace("_", " ").title()),
+            score_contribution=round(contribution, 4),
+            confidence=round(min(sig_value, 0.90), 4),
+            severity=severity,
+            evidence=evidence,
+            alternative_explanations=alt_explanations[:3],  # cap at 3 per finding
+            tags=meta.get("tags", [language]),
+        )
+        findings.append(finding)
+
+    return findings[:10]  # top 10 findings max
+
+
 def score_file(
     path: Path,
     language: str,
     kind: str,
     lines: int,
     signals: Dict[str, float],
+    category: FileCategory = FileCategory.UNKNOWN,
+    framework_ctx: Optional[FrameworkContext] = None,
+    is_critical_path: bool = False,
+    has_git: bool = False,
+    module_path: str = "",
 ) -> FileAnalysis:
     """
     Aggregate signals into a scored FileAnalysis.
 
-    signals: dict of ALL_SIGNAL_KEYS → float [0.0, 1.0]
-    Missing keys default to 0.40 (neutral).
+    signals:      dict of ALL_SIGNAL_KEYS → float [0.0, 1.0]
+    category:     semantic file category (affects adjusted score)
+    framework_ctx: detected framework context (affects adjusted score)
+
+    Missing signal keys default to 0.40 (neutral).
     """
     weights = get_weights(language)
 
@@ -126,7 +275,7 @@ def score_file(
     # Confidence from signal agreement
     confidence = _signal_agreement(full_signals, weights, raw_score)
 
-    # Classification
+    # Classification (with confidence gating)
     if confidence < MIN_CONFIDENCE:
         classification = "uncertain"
     elif ai_likelihood >= THRESH_AI_HIGH:
@@ -145,6 +294,21 @@ def score_file(
         sorted(contributions.items(), key=lambda x: -x[1])[:4]
     )
 
+    # Build adjusted score and risk score
+    score_breakdown = build_score_breakdown(
+        raw_score=raw_score,
+        confidence=confidence,
+        category=category,
+        framework_ctx=framework_ctx,
+        signals=full_signals,
+        is_critical_path=is_critical_path,
+        has_git=has_git,
+        lines=lines,
+    )
+
+    # Build findings
+    findings = _build_findings(full_signals, contributions, language, framework_ctx)
+
     return FileAnalysis(
         path=str(path),
         language=language,
@@ -156,4 +320,13 @@ def score_file(
         confidence=confidence,
         classification=classification,
         top_signals=top_signals,
+        # v4.0 fields
+        category=category,
+        adjusted_score=score_breakdown.adjusted_score,
+        risk_score=score_breakdown.risk_score,
+        score_breakdown=score_breakdown,
+        framework_context=framework_ctx,
+        findings=findings,
+        uncertainty_reasons=score_breakdown.uncertainty_reasons,
+        module_path=module_path,
     )
