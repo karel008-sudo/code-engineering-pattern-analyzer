@@ -88,7 +88,7 @@ def build_markdown_report(
     lines += [
         "## Executive Summary",
         "",
-        "| Repository | KPI Score | AI-like% | Files | Risk | Pattern |",
+        "| Repository | AI-Pattern Index | High-Signal-Files¹ | Files | Risk | Label |",
         "|---|---|---|---|---|---|",
     ]
     for stats in sorted(all_stats, key=lambda s: -s.kpi_score):
@@ -100,7 +100,15 @@ def build_markdown_report(
             f"| {stats.repo_name} | {emoji} {kpi_pct} | {ai_pct} | "
             f"{stats.production_files} | {risk_lvl} | {stats.summary_label} |"
         )
-    lines += ["", "---", ""]
+
+    lines += [
+        "",
+        "> ¹ **High-Signal-Files**: files exceeding the pattern-signal threshold. "
+        "This is **not** '% of files written by AI'. It is a code-style pattern metric.",
+        "",
+        "---",
+        "",
+    ]
 
     # Per-repository detail
     for stats in all_stats:
@@ -174,17 +182,21 @@ def _build_repo_section(stats: RepoStats, analyses: List[FileAnalysis]) -> List[
             )
         lines.append("")
 
-    # Classification breakdown
+    # Pattern-signal classification breakdown
     total = max(stats.production_files, 1)
     lines += [
-        "### Classification",
+        "### Pattern-Signal Classification",
         "",
-        f"| Label | Count | % |",
+        "> Labels describe **code pattern signals**, not verified authorship. "
+        "'AI-like' means the file's style exceeds the pattern-signal threshold — "
+        "not that it was proven to be AI-generated.",
+        "",
+        f"| Pattern label | Count | % |",
         f"|---|---|---|",
-        f"| AI-like | {stats.ai_like_count} | {stats.ai_like_count/total*100:.1f}% |",
-        f"| Mixed | {stats.mixed_count} | {stats.mixed_count/total*100:.1f}% |",
-        f"| Human-like | {stats.human_like_count} | {stats.human_like_count/total*100:.1f}% |",
-        f"| Uncertain | {stats.uncertain_count} | {stats.uncertain_count/total*100:.1f}% |",
+        f"| AI-like pattern signals | {stats.ai_like_count} | {stats.ai_like_count/total*100:.1f}% |",
+        f"| Mixed signals | {stats.mixed_count} | {stats.mixed_count/total*100:.1f}% |",
+        f"| Human-like pattern signals | {stats.human_like_count} | {stats.human_like_count/total*100:.1f}% |",
+        f"| Uncertain (low signal confidence) | {stats.uncertain_count} | {stats.uncertain_count/total*100:.1f}% |",
         f"",
     ]
 

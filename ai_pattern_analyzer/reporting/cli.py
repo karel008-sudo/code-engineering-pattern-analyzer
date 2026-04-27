@@ -87,13 +87,14 @@ def print_repo_summary(stats: RepoStats, use_color: bool = True) -> None:
     # v5.0: AI Origin Estimate
     if stats.origin_estimate:
         oe = stats.origin_estimate
-        print(f"  ── AI Origin Estimate (heuristic estimate, not forensic proof) ──")
-        print(f"  Estimated fully AI-generated: {oe.fully_ai_generated_pct:5.1f}%"
+        print(f"  ── AI Origin Pattern Estimate ──────────────────────────────────────")
+        print(f"  ⚠ Pattern estimates only — NOT proof of actual authorship")
+        print(f"  Fully AI-like pattern signals: {oe.fully_ai_generated_pct:5.1f}%"
               f"  confidence: {oe.confidence}")
-        print(f"  Estimated AI-assisted:        {oe.ai_assisted_pct:5.1f}%")
-        print(f"  Estimated human-authored:     {oe.human_authored_pct:5.1f}%")
+        print(f"  AI-assisted pattern signals:   {oe.ai_assisted_pct:5.1f}%")
+        print(f"  Human-pattern signals:         {oe.human_authored_pct:5.1f}%")
         total_check = oe.fully_ai_generated_pct + oe.ai_assisted_pct + oe.human_authored_pct
-        print(f"  (Sum: {total_check:.1f}% — directional estimates, not exact proof)")
+        print(f"  (Sum: {total_check:.1f}%  |  Generated/vendor files excluded)")
         print()
 
     # File counts
@@ -169,10 +170,10 @@ def print_repo_summary(stats: RepoStats, use_color: bool = True) -> None:
                   f"{a.risk_score:>5.1%}  "
                   f"{a.confidence:>5.2f}")
 
-    # Top AI-like files (by raw score, for context)
+    # Top high-signal files (by raw score, for context)
     if stats.top_ai_files:
         print()
-        print("  Top AI-like files (highest raw likelihood):")
+        print("  Top high-signal files (elevated AI-like pattern score — not proven AI origin):")
         print(f"  {'Likelihood':>10}  {'Adj':>5}  {'Conf':>5}  {'Lang':<8}  {'Category':<18}  File")
         print(f"  {'─'*10}  {'─'*5}  {'─'*5}  {'─'*8}  {'─'*18}  {'─'*35}")
         for a in stats.top_ai_files:
@@ -222,8 +223,10 @@ def print_multi_repo_table(all_stats: List[RepoStats]) -> None:
     print(f"║  CODE ENGINEERING PATTERN ANALYZER v{ANALYZER_VERSION} — RESULTS"
           + " " * (w - 52 - len(ANALYZER_VERSION)) + "║")
     print("╠" + "═" * (w - 2) + "╣")
-    header = (f"║  {'Repo':<25}  {'KPI%':>5}  {'AI-like%':>8}  "
-              f"{'Adj':>5}  {'Risk':>5}  {'Files':>5}  {'Pattern':<20}  ║")
+    header = (f"║  {'Repo':<25}  {'KPI%':>5}  {'Sig>Thr%':>8}  "
+              f"{'Adj':>5}  {'Risk':>5}  {'Files':>5}  {'Pattern label':<20}  ║")
+    # Note: 'Sig>Thr%' = % of files exceeding pattern-signal threshold
+    #       This is NOT "% of files written by AI"
     print(header)
     print("╠" + "═" * (w - 2) + "╣")
     for s in sorted(all_stats, key=lambda x: -x.kpi_score):
@@ -266,14 +269,17 @@ def print_repo_origin_estimate(stats: RepoStats, use_color: bool = True) -> None
     oe = stats.origin_estimate
 
     print(f"""
-  Estimated origin distribution:
+  AI Origin Pattern Estimate:
   ─────────────────────────────────────────────────────────────────
-  Fully AI-generated: {oe.fully_ai_generated_pct:5.1f}%    confidence: {oe.confidence:<8}  (AI generated in one shot)
-  AI-assisted:        {oe.ai_assisted_pct:5.1f}%    confidence: {oe.confidence:<8}  (Copilot-like assistance)
-  Human-authored:     {oe.human_authored_pct:5.1f}%    confidence: {oe.confidence:<8}  (hand-written code)
+  Fully AI-like pattern signals:   {oe.fully_ai_generated_pct:5.1f}%    confidence: {oe.confidence}
+    (patterns consistent with full AI/scaffold generation — not proven)
+  AI-assisted pattern signals:     {oe.ai_assisted_pct:5.1f}%    confidence: {oe.confidence}
+    (patterns consistent with AI-assisted editing — not proven)
+  Human-pattern signals:           {oe.human_authored_pct:5.1f}%    confidence: {oe.confidence}
+    (patterns consistent with human-authored code — not proven)
   ─────────────────────────────────────────────────────────────────
-  Note: Three percentages sum to 100%. These are directional estimates.
-        Vendor/generated files excluded from KPI.
+  Sum: {oe.fully_ai_generated_pct + oe.ai_assisted_pct + oe.human_authored_pct:.1f}%
+  ⚠ Generated/vendor files excluded. Pattern signals only — not authorship proof.
 """)
 
     # Confidence intervals

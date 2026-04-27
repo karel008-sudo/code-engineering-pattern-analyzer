@@ -111,13 +111,21 @@ def _build_repo(
 
 
 def _compute_portfolio_origin(all_stats: List[RepoStats]) -> Optional[Dict[str, Any]]:
-    """Compute portfolio-wide origin estimate from all repo estimates."""
+    """Compute portfolio-wide origin estimate from all repo estimates.
+
+    Uses kpi_eligible file count as weight — this matches the population
+    that was actually used to compute each repo's origin_estimate.
+    Using production_files would create a weight mismatch since the origin
+    estimate also includes test files (which are kpi_eligible).
+    """
     try:
         from ..origin.engine import aggregate_origin_estimates
         pairs = [
-            (s.origin_estimate, s.production_files)
+            # Weight by kpi_eligible (origin estimate population), not just production files
+            (s.origin_estimate, s.exclusions.get("kpi_eligible", s.production_files))
             for s in all_stats
-            if s.origin_estimate is not None and s.production_files > 0
+            if s.origin_estimate is not None
+            and s.exclusions.get("kpi_eligible", s.production_files) > 0
         ]
         if not pairs:
             return None

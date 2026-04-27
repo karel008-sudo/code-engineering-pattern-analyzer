@@ -350,14 +350,15 @@ def _explain_file(
     # Origin Estimate
     if a.origin_estimate:
         oe = a.origin_estimate
-        print(f"{BOLD}AI Origin Estimate  (heuristic estimate, not forensic proof):{W}")
+        print(f"{BOLD}AI Origin Pattern Estimate  (heuristic estimate — NOT authorship proof):{W}")
+        print(f"  ⚠ Pattern signals only. Generated/vendor files excluded from this estimate.")
         ai_col = RED if oe.fully_ai_generated_pct > 30 else YELLOW
         h_col  = GREEN if oe.human_authored_pct > 50 else W
-        print(f"  {ai_col}Estimated fully AI-generated: {oe.fully_ai_generated_pct:.1f}%{W}"
+        print(f"  {ai_col}Fully AI-like pattern signals: {oe.fully_ai_generated_pct:.1f}%{W}"
               f"  [{oe.intervals.get('fully_ai_generated', '')}]")
-        print(f"  {YELLOW}Estimated AI-assisted:        {oe.ai_assisted_pct:.1f}%{W}"
+        print(f"  {YELLOW}AI-assisted pattern signals:   {oe.ai_assisted_pct:.1f}%{W}"
               f"  [{oe.intervals.get('ai_assisted', '')}]")
-        print(f"  {h_col}Estimated human-authored:     {oe.human_authored_pct:.1f}%{W}"
+        print(f"  {h_col}Human-pattern signals:         {oe.human_authored_pct:.1f}%{W}"
               f"  [{oe.intervals.get('human_authored', '')}]")
         print(f"  Confidence: {oe.confidence}  ({oe.confidence_level:.2f})")
         print()

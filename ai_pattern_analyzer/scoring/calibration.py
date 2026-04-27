@@ -138,13 +138,17 @@ class RepoStats:
 
     @property
     def summary_label(self) -> str:
+        """
+        Repository-level pattern density label.
+        These labels describe CODE PATTERN SIGNALS, not verified authorship.
+        """
         if self.kpi_score > 0.55:
-            return "Elevated AI-like pattern density"
+            return "Elevated AI-pattern signal density"
         if self.kpi_score > 0.40:
-            return "Moderate AI-like patterns"
+            return "Moderate AI-pattern signals"
         if self.kpi_score > 0.25:
-            return "Low AI-like signal density"
-        return "Predominantly human-like patterns"
+            return "Low AI-pattern signal density"
+        return "Low AI-pattern signal density"  # avoid 'human-like' as authorship claim
 
     def as_dict(self) -> dict:
         return {
@@ -163,7 +167,10 @@ class RepoStats:
             "p25":               round(self.p25, 4),
             "p75":               round(self.p75, 4),
             "p90":               round(self.p90, 4),
-            "ai_like_pct":       round(self.ai_like_pct, 2),
+            # ⚠ ai_like_pct = files exceeding pattern-signal threshold.
+            # This is NOT "% of files written by AI". It is a code-style pattern metric.
+            "high_pattern_signal_pct": round(self.ai_like_pct, 2),
+            "ai_like_pct":       round(self.ai_like_pct, 2),   # deprecated alias
             "ai_like_count":     self.ai_like_count,
             "human_like_count":  self.human_like_count,
             "mixed_count":       self.mixed_count,

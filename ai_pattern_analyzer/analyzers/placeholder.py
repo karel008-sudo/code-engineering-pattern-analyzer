@@ -160,7 +160,7 @@ _GENERIC_FUNC_NAMES = re.compile(
 
 def generic_literal_density(text: str) -> float:
     """
-    Detect generic placeholder literals common in AI-generated examples.
+    Detect generic placeholder literals associated with generated or tutorial-style examples.
     Returns AI-like signal [0.0, 1.0].
     """
     lines = max(text.count("\n") + 1, 1)
@@ -248,7 +248,8 @@ _OBVIOUS_COMMENT_PATTERNS = re.compile(
 def obvious_comment_density(text: str) -> float:
     """
     Detect comments that merely restate what the code obviously does.
-    Such over-obvious comments are characteristic of AI-generated code.
+    Such over-obvious comments are associated with generated, scaffolded, or
+    template-expanded code patterns.
     """
     lines = max(text.count("\n") + 1, 1)
     obvious = len(_OBVIOUS_COMMENT_PATTERNS.findall(text))

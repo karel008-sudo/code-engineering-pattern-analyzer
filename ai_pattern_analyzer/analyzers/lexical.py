@@ -74,7 +74,8 @@ def type_token_ratio(text: str) -> float:
 
 def repetition_index(text: str) -> float:
     """
-    Detects structurally repeated blocks — a pattern common in AI-generated code
+    Detects structurally repeated blocks — a pattern associated with generated,
+    templated, or mechanically produced code
     (e.g., nearly identical if-blocks, repeated exception handlers, similar methods).
 
     Splits text into overlapping n-gram shingles and measures repetition.

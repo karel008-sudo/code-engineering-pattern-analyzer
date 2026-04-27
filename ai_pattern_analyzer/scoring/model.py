@@ -360,16 +360,23 @@ def score_file(
     )
 
     # v5.0: Compute OriginEstimate (three-way probability)
-    try:
-        from ..origin.engine import compute_file_origin
-        analysis.origin_estimate = compute_file_origin(
-            file_analysis=analysis,
-            scaffold_score=scaffold_score,
-            style_continuity=style_continuity,
-            magic_number_score=magic_number_score,
-            name_body_coherence=name_body_coherence,
-        )
-    except Exception:
-        pass  # Origin estimate is optional; never fail the whole scan
+    # IMPORTANT: Skip for GENERATED and VENDOR files.
+    # Auto-generated code (protobuf, OpenAPI, jOOQ) and vendored third-party code
+    # are excluded from the AI origin KPI entirely.  Computing an origin estimate
+    # for them would be misleading — a protobuf stub is not "LLM-generated", it is
+    # tool-generated, which is a fundamentally different concept.
+    _SKIP_ORIGIN = (FileCategory.GENERATED, FileCategory.VENDOR)
+    if category not in _SKIP_ORIGIN:
+        try:
+            from ..origin.engine import compute_file_origin
+            analysis.origin_estimate = compute_file_origin(
+                file_analysis=analysis,
+                scaffold_score=scaffold_score,
+                style_continuity=style_continuity,
+                magic_number_score=magic_number_score,
+                name_body_coherence=name_body_coherence,
+            )
+        except Exception:
+            pass  # Origin estimate is optional; never fail the whole scan
 
     return analysis
