@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and thi
 
 ## [Unreleased]
 
+## [5.0.1] — 2026-05-06
+
+### Added
+- `LICENSE` (MIT)
+- `CONTRIBUTING.md` — contribution guidelines and dev setup
+- `SECURITY.md` — threat model and vulnerability reporting policy
+- `CODE_OF_CONDUCT.md`
+- `ARCHITECTURE.md` — high-level pipeline and design principles
+- `CHANGELOG.md` (this file)
+- `.github/workflows/ci.yml` — matrix testing on Python 3.8/3.10/3.12 + analyzer self-scan
+- `.github/ISSUE_TEMPLATE/` — bug report, feature request, security routing
+- `.github/PULL_REQUEST_TEMPLATE.md`
+- README badges: CI status, Python version, License, Tests, Local-first, Languages, Schema
+
+### Note
+- No behavior changes. Open-source-readiness release.
+
 ## [5.0.0] — 2026-04-25
 
 ### Added
