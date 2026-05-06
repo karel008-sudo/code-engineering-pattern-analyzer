@@ -1,5 +1,13 @@
 # Code Engineering Pattern Analyzer v5.0
 
+[![CI](https://github.com/karel008-sudo/code-engineering-pattern-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/karel008-sudo/code-engineering-pattern-analyzer/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-170%20passing-brightgreen)](tests/)
+[![Local-first](https://img.shields.io/badge/local--first-no%20external%20calls-informational)](#privacy-and-security)
+[![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20Kotlin-blue)](#language-support-matrix)
+[![Schema](https://img.shields.io/badge/schema-v5.0-blueviolet)](IMPLEMENTATION_STATUS.md)
+
 A **local-first, heuristic analyzer** that estimates AI-like, AI-assisted, automation-like, and generated-code characteristics in Python, Java, and Kotlin repositories. Operates entirely offline — no ML models, no external APIs, no LLM calls, no source code leaves the machine.
 
 > **Critical framing:** This tool does **not** detect AI-generated code with certainty.

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/karel008-sudo/code-engineering-pattern-analyzer/security/advisories/new
+    about: Please report security issues privately, not via public issues. See SECURITY.md.
+  - name: Discussion / question
+    url: https://github.com/karel008-sudo/code-engineering-pattern-analyzer/discussions
+    about: For general questions or design discussions (enable Discussions in repo settings if not visible).
