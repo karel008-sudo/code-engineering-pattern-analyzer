@@ -58,7 +58,7 @@ jobs:
 
       - name: Run analyzer on its own source
         run: |
-          python -m ai_pattern_analyzer --dirs ./ai_pattern_analyzer --profile ci --format json > self-scan.json
+          python -m ai_pattern_analyzer --dirs ./ai_pattern_analyzer --profile ci --format json --quiet > self-scan.json
           echo "Self-scan complete. Schema version:"
           python -c "import json; d=json.load(open('self-scan.json')); print(d.get('schema_version', 'unknown'))"
 
